@@ -1,0 +1,38 @@
+ ============================================================================
+# Konggu 服务端 (server/) —— Python 依赖清单
+# ----------------------------------------------------------------------------
+# 来源：从代码 import 语句提取（konggu_server.py / KongguProcessFiles.py /
+#       pairAlign.py / MergeImage.py / test_flask.py）
+#
+# 安装：
+#   python3 -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+#
+# 注意：
+#   1) 若使用 NVIDIA GPU，建议先按 https://pytorch.org 安装匹配的 CUDA 版
+#      torch/torchvision，再安装其余依赖（ultralytics 会自动补齐自身依赖）。
+#   2) 版本号为建议下限，请以你本地实际测试通过的组合为准。
+#   3) scipy / natsort 在 konggu_server.py 中被 import 但当前代码未实际使用，
+#      属历史遗留；保留以免将来启用相关逻辑时缺失。
+# ============================================================================
+
+# ---- 深度学习 / 推理 ----
+torch>=2.0.0            # konggu_server.py: import torch.cuda（建议 CUDA 版）
+torchvision>=0.15.0     # ultralytics 依赖（如需显式指定请与 torch 版本匹配）
+ultralytics>=8.0.0      # konggu_server.py / KongguProcessFiles.py: from ultralytics import YOLO
+
+# ---- 图像处理 / 数学 ----
+opencv-python>=4.5.0    # cv2：取流 / 对齐 / 融合 / imshow / imwrite
+numpy>=1.21.0           # 矩阵运算（cv2 / torch 均依赖）
+Pillow>=8.0.0           # pairAlign.py / test_flask.py: from PIL import Image, ImageTk
+matplotlib>=3.3.0       # pairAlign.py: matplotlib.cm / matplotlib.colors（绘制 colormap）
+
+# ---- Web 服务 ----
+flask>=2.0.0            # konggu_server.py: Flask 应用（host 0.0.0.0, port 8088）
+
+# ---- 当前被 import 但未实际使用（历史遗留）----
+scipy>=1.7.0            # konggu_server.py: import scipy（未见调用）
+natsort>=7.0.0          # konggu_server.py: from natsort import natsort（未见调用）
+
+# ---- 仅测试脚本需要（test_flask.py）----
+# tkinter 为 Python 标准库（Windows/macOS 官方安装自带；Linux 需 apt install python3-tk）

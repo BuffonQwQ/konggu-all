@@ -1,0 +1,78 @@
+ ============================================================================
+# Konggu — Git 忽略规则
+# 覆盖：C++ 编译产物、Python 缓存、运行期临时上传/输出、本地配置、IDE 目录
+# ============================================================================
+
+# ------------------------- 构建产物 (客户端 C++) -------------------------
+build/
+client/build/
+Konggu/build/
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+TestCamera/camera_main
+camera_main
+Camera.jpg
+
+# ------------------------- Python 缓存 / 虚拟环境 -------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ------------------------- 运行期数据（自动生成） -------------------------
+# 客户端本地图片缓存
+client/data/
+Konggu/data/
+data/
+# 服务端接收与输出目录
+uploads_konggu/
+out_konggu/
+server/uploads_konggu/
+server/out_konggu/
+uploads/
+server/uploads/
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.raw
+
+# ------------------------- 模型权重（体积大；如需版本管理请改用 Git LFS）----
+# 若希望把权重纳入仓库，请注释下面两行并使用 git-lfs
+konggu_models/
+server/konggu_models/
+*.pt
+
+# ------------------------- 本地配置 / 敏感信息 -------------------------
+config.ini
+config.yaml
+.env
+.env.*
+*.local
+*.secret
+secrets/
+credentials
+
+# ------------------------- IDE / 编辑器 -------------------------
+.vscode/
+.idea/
+.history/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ------------------------- 日志 / 其它 -------------------------
+*.log
+nohup.out
+*.tmp
