@@ -1,19 +1,37 @@
- Konggu（空鼓/热隐患巡检）：红外 + 可见光双模态采集与 YOLO 推理预警原型
+# Konggu（空鼓）：应用热成像与图像拼接技术的墙体缺陷智能检测装置
 
-> **一句话概述**：`Konggu` 是一个面向电动自行车场景（座位/电池区域热隐患）的
-> **边缘采集客户端（C++）+ 服务端推理展示（Python/Flask + YOLO）** 原型系统——
-> 客户端驱动红外热成像机芯（UThermalLib SDK，型号 JX007）与 USB 可见光摄像头，
-> 将"伪彩色热图 + 可见光图"成对上传；服务端负责对齐融合、YOLO 目标检测（可选低温/高温模型）
-> 并在本地窗口实时展示标注结果。
+> **一句话概述**：本项目是一套**应用热成像与图像拼接技术的墙体缺陷智能检测装置**软件代码包，
+> 用于替代传统人工高空作业，实现墙体**空鼓、裂缝、渗水**等缺陷的自动化、可视化检测。
+> 空中端无人机搭载树莓派 4B，同步驱动热成像（UTi537B，640×512）与可见光（2560×1440）
+> 两路相机；地面工作站接收图像后，经 **YOLO11n-seg 实例分割 + 可见光全景拼接 + 双光标定融合**，
+> 生成带缺陷轮廓标注的墙体全貌图。
 
-> ⚠️ 状态说明：本项目由教学/调试用途代码演化而来，属于**工作原型**而非生产级产品。
-> 目录中保留了较多注释性/历史性代码（详见 `docs/CODE_REVIEW_NOTES.md`）。
+> ⚠️ 状态说明：项目软硬件 Demo 已可正常运行。本仓库代码为早期开发/教学形态的**参考实现**，
+> 与当前 Demo 在硬件取流方式与部分算法上存在演进差异（详见“八、已知限制与版本差异”），
+> 请以 Demo 实际适配版本为准。
 
 ---
 
 ## 一、系统架构
 
-采集与推理被拆分为两个独立程序，通过 HTTP 通信：
+采集与推理被拆分为两个独立程序，通过 HTTP 通信（下方架构图为仓库**参考实现**的行为；
+当前 Demo 的算法主链路已升级为“YOLO 实例分割 + 全景拼接 + 标定融合”，见“七、关键算法与自研部分”）。
+
+**当前适配的成套软硬件（Demo，已可正常运行）**：
+
+- **空中端**：旋翼无人机，机载 **树莓派 4B**（Broadcom BCM2711，1.5 GHz CPU），并同时挂载
+  **热成像摄像头 UTi537B**（640×512，RGB888 输出）与**可见光摄像头**（2560×1440）。
+  树莓派负责控制两路相机同步采集，并通过 WiFi 局域网与地面工作站通信。
+- **地面端**：高性能工作站（Intel i5-1035G4 + AMD Radeon 630 GPU + 16 GB RAM，Windows 10），
+  负责接收数据、运行 AI 模型与图像处理。
+- **软件流程**：客户端（树莓派 C++）用 OpenCV 循环捕获两路画面，每 10 帧抽取 1 帧，将热成像
+  原始 RGB 转 BGR 后经 libcurl 以 HTTP multipart/form-data 上传至 Flask `/upload`；服务端保存
+  图像 → 以自训练 **YOLO11n-seg** 对热成像做像素级缺陷识别（输出检测框、置信度与分割掩码）→
+  将可见光多张局部图拼接为全景长图 → 依标定平移参数（`trans 100,-10`，对应热像/可见光垂直视差 Δh）
+  把缺陷结果对齐到可见光全景 → 生成带标注的墙体全貌图。
+
+> 注：图中节点/时序反映了仓库内早期代码（JX007 机芯 + YOLO 检测）的实际行为；如需对照 Demo
+> 主链路，请以本节文字与“七”为准。
 
 ```mermaid
 flowchart LR
@@ -36,7 +54,7 @@ flowchart LR
     subgraph server["推理/展示服务端 (server/ - Python 工作台)"]
         J -- "同前缀 {n}_temp.jpg / {n}_camera.jpg" --> K["pairAlign.py 对齐融合<br/>(可见光放大1.5x + 平移对齐)"]
         K --> L["YOLO 推理 (cold/hot-best.pt)"]
-        L --> M["标注座位框并保存<br/>out/{n}.jpg + out/{n}_blended.jpg"]
+        L --> M["标注目标框并保存<br/>out/{n}.jpg + out/{n}_blended.jpg"]
         M --> N["cv2.imshow 实时窗口展示"]
     end
 
@@ -92,7 +110,7 @@ sequenceDiagram
         T->>T: 扫描 uploads_konggu/ 找出未处理 jpg
         T->>T: 按前缀匹配文件对 (n_temp.jpg, n_camera.jpg)
         T->>T: pairAlign 缩放/平移/裁剪对齐 → blend
-        T->>T: YOLO 推理 → class 0 座位框延展标注
+        T->>T: YOLO 推理 → class 0 目标框延展标注
         T->>T: 输出 out/{n}.jpg、out/{n}_blended.jpg
         T->>N: cv2.imshow 窗口展示
     end
@@ -102,8 +120,9 @@ sequenceDiagram
 
 ## 三、目录结构
 
-> 现有源码目录（`Konggu/`、`konggu-server/`、`TestCamera/`）与下述标准 GitHub 布局的
-> 对应关系，见文末"从现有目录迁移"一节。
+> 现有源码目录（`Konggu/`、`konggu-server/`、`TestCamera/`）与标准 GitHub 布局的对应关系，
+> 就是把 `Konggu/`→`client/`、`konggu-server/`→`server/`、`TestCamera/camera_main.cpp`→`client/tools/`
+> 改名迁移；目录用途见下方树形结构。
 
 ```
 konggu-all/
@@ -130,7 +149,7 @@ konggu-all/
 │   ├── KongguProcessFiles.py      # ← 目录监控 + 文件对配对 + YOLO 推理
 │   ├── pairAlign.py               # ← 红外/可见光对齐、裁剪、融合
 │   ├── MergeImage.py              # ← 全景拼接工具（当前主流程未调用）
-│   ├── konggu_models/             # ← YOLO 权重（cold-best.pt / hot-best.pt）
+│   ├── konggu_models/             # ← YOLO 权重（仓库内 cold/hot-best.pt；Demo 为 cold/warm-best.pt）
 │   ├── uploads_konggu/            # 运行时：接收的图片（自动创建）
 │   └── out_konggu/                # 运行时：推理结果输出（自动创建）
 │
@@ -154,12 +173,15 @@ konggu-all/
 
 ### 4.1 硬件
 
-| 组件 | 说明 | 出处 |
+| 层级 | 硬件 | 规格 / 说明 |
 |---|---|---|
-| 红外热成像机芯 | 型号 **UT-JX007**（`UT_Init(&pInstance, UT_JX007)`），通过 UThermalLib SDK 驱动 | `client/main.cpp` |
-| 可见光摄像头 | USB 摄像头 `/dev/video0`（OpenCV `VideoCapture(0)`） | `client/main.cpp`、`TestCamera/camera_main.cpp` |
-| 采集端主控 | 运行 Linux 的边缘设备（源码含 RK 平台/树莓派交叉编译线索：`rknn_api`、rockchip 工具链注释） | `client/CMakeLists.txt`（注释） |
-| 推理端主机 | 运行 Python + PyTorch/YOLO 的工作站（需 CUDA 显卡以利用 `torch.cuda` 加速） | `server/konggu_server.py` |
+| 空中端 | 旋翼无人机 | 搭载树莓派 4B 与双相机，执行墙体巡检拍摄 |
+| 空中端 | 树莓派 4B | Broadcom BCM2711，1.5 GHz CPU；控制两路相机同步采集并通过 WiFi 与地面端通信 |
+| 空中端 | 热成像摄像头 UTi537B | 640×512，RGB888 输出 |
+| 空中端 | 可见光摄像头 | 2560×1440 |
+| 地面端 | 工作站 | Intel i5-1035G4 + AMD Radeon 630 GPU + 16 GB RAM + Windows 10；接收数据、运行 AI 模型与图像处理 |
+| 参考实现 | 红外机芯 | 仓库 C++ 参考实现基于 UThermalLib SDK 的 **UT-JX007**（`UT_Init(UT_JX007)`）；与 Demo 的 UTi537B 取流方式不同，移植时需替换取流层 |
+| 参考实现 | USB 可见光摄像头 | OpenCV `VideoCapture(0)`（Linux `/dev/video0`） |
 
 > 注意：CMake 注释中残留了 aarch64（JX003）与 rockchip830 交叉编译路径，且链接了
 > `rknn_api`，暗示该 SDK 历史上有多个平台（JX002/003/004/007）与 NPU 加速的使用经历；
@@ -192,11 +214,17 @@ konggu-all/
 - `Pillow`（`pairAlign.py`/`test_flask.py` 用到）
 - `matplotlib`（`pairAlign.py` 用到 cm/colors）
 - `scipy`、`natsort`（`konggu_server.py` 中导入但**当前代码并未真正使用**，历史遗留）
-- 推理权重：`server/konggu_models/cold-best.pt`（低温）、`hot-best.pt`（高温）
+- 推理权重：仓库内为 `server/konggu_models/cold-best.pt`（低温）、`hot-best.pt`（高温）；
+  当前 Demo 命名为 `cold-best.pt` / `warm-best.pt`（差异见“八”）
 
 ---
 
 ## 五、安装与编译
+
+> 说明：本节给出的是**本仓库参考实现**的构建/运行方式（服务端部分与 Demo 基本一致，
+> 客户端部分对应早期 JX007 机芯取流）。当前 Demo 的客户端改为在树莓派 4B 上用 OpenCV
+> 直读 UTi537B（RGB888）与可见光两路 USB 相机并上传，构建方式以此处为准做相应替换即可
+> （取流层差异见“八、已知限制与版本差异”）。
 
 ### 5.1 客户端（C++）
 
@@ -214,7 +242,7 @@ sudo apt-get install -y build-essential cmake libopencv-dev libcurl4-openssl-dev
 cd client
 cmake -S . -B build
 cmake --build build -j
-# 若 SD 库不在 ./lib，可用 -DKONGGU_SDK_DIR=/绝对/路径 指定
+# 若 SDK 库不在 ./lib，可用 -DKONGGU_SDK_DIR=/绝对/路径 指定
 ```
 
 运行（需在有显示/取流权限的采集机上，从 `build/` 内执行以匹配相对路径 `../data`）：
@@ -282,9 +310,56 @@ python konggu_server.py
 
 ---
 
-## 七、已知限制与设计权衡
+## 七、关键算法与自研部分（当前 Demo）
 
-（逐条对应当前代码的真实取舍；更完整的安全/并发清单见 `docs/CODE_REVIEW_NOTES.md`）
+> 本节描述的是项目当前 Demo 的算法与自研工作（据项目团队提供的信息整理），
+> 可作为仓库代码后续演进的目标形态。仓库内早期代码与本节存在差异时，以本节/Demo 为准，
+> 差异点汇总见“八、已知限制与版本差异”。
+
+### 7.1 模型训练（YOLO11n-seg 实例分割）
+
+- 团队自制**模拟墙体缺陷样品**，在**低温（10°C、25°C）**与**高温（40°C、55°C）**两种环境下，
+  分别从 **40 cm 与 80 cm** 距离拍摄约 **1000 张**热成像照片；
+- 使用 **LabelMe** 标注，按 **8:2** 划分训练/验证集；
+- 在 YOLO 框架下训练出 **YOLO11n-seg 实例分割模型**（权重：低温版 `cold-best.pt`、高温版
+  `warm-best.pt`），可对热成像图像做像素级缺陷识别，输出检测框、置信度及分割掩码。
+
+### 7.2 可见光图像拼接（生成墙体全貌长图）
+
+- 对无人机采集的可见光局部图进行**畸变校正 → 特征点匹配 → 投影变换**后依次拼接，
+  生成完整的墙体立面长图。
+- 仓库内对应模块：`server/MergeImage.py`（当前为简化实现，尚未接入主流程，见“八”）。
+
+### 7.3 热像 / 可见光数据融合（缺陷标注叠加）
+
+- 通过实测**标定两个摄像头的安装高度差**，得到平移参数 `trans 100,-10`（对应热像与可见光
+  之间的垂直视差 Δh，即仓库代码中的 `pair_align_func_konggu(..., trans_x=100, trans_y=-10)`）；
+- 将热成像上的缺陷检测结果平移对齐到可见光全景坐标系，最终生成带缺陷标注的墙体全貌图。
+
+---
+
+## 八、已知限制与版本差异
+
+### 8.1 仓库参考实现 vs 当前 Demo 的版本差异（重要）
+
+本仓库是早期开发/教学形态的参考实现，而项目当前已交付可正常运行的软硬件 Demo。二者在
+**取流硬件、模型形态与算法主链路**上并不完全一致，对照或迁移时请注意：
+
+| 维度 | 仓库参考实现（本仓库代码） | 当前 Demo（已正常运行） |
+|---|---|---|
+| 采集端平台 | 嵌入式 Linux + UThermalLib SDK（机芯 UT-JX007，USB） | 无人机 + 树莓派 4B + OpenCV 直读两路 USB 相机 |
+| 热成像设备 | JX007 机芯（Y8/Y16 原始帧） | UTi537B（640×512，RGB888 输出） |
+| 可见光设备 | USB 摄像头 `/dev/video0` | 2560×1440 可见光相机 |
+| 模型形态 | YOLO（检测，class 0 框选） | YOLO11n-seg（实例分割，输出掩码） |
+| 推理输入 | 对齐后的可见光区域（`rgb_img`） | 热成像图像（缺陷像素级识别） |
+| 全景拼接 | `MergeImage.py` 简化实现，未接入主流程 | 畸变校正+特征匹配+投影变换的可见光全景拼接 |
+| 融合对齐 | `pairAlign.py` 平移+叠加（`trans 100,-10`） | 按标定高度差平移热像缺陷框到可见光全景（Δh 标定） |
+| 模型权重命名 | `cold-best.pt` / `hot-best.pt` | `cold-best.pt`（低温）/ `warm-best.pt`（高温） |
+
+> 简单说：仓库代码证明了“双光采集 → 上传 → 对齐 → 模型推理”这条链路可行；
+> Demo 在此之上把模型换成分割、把输入切到热图、并补上了可见光拼接与全貌图生成。
+
+（下方第 1–7 条为仓库代码自身的真实取舍；更完整的安全/并发清单见 `docs/CODE_REVIEW_NOTES.md`）
 
 1. **"每 10 帧丢两个 detach 线程上传"是稳定性权宜之计**：`main.cpp` 为不阻塞采集主循环，
    每次上传都新建 `std::thread` 并 `detach()`，**没有线程池/上限/失败重传**。网络抖动时线程可能堆积。
@@ -293,8 +368,8 @@ python konggu_server.py
 2. **服务端依赖文件名配对且无超时机制**：只有 `{n}_temp.jpg` 或只有 `{n}_camera.jpg` 到达时，
    该文件会一直滞留在 `unprocessed_files` 等待另一半，不会自动清理/告警。
 3. **推理输入是可见光图而非热图**：`KongguProcessFiles.py` 中 `self.model(rgb_img)` 传入的是
-   裁剪后的可见光区域，源码里也留有"为什么推理用 rgb_img"的疑问注释。若业务目标是热异常检测，
-   这属于**待确认的设计取舍**。
+   裁剪后的可见光区域，源码里也留有"为什么推理用 rgb_img"的疑问注释。若缺陷判定希望直接利用
+   热图特征（如空鼓热斑、温差异常），则这属于**待确认的设计取舍**。
 4. **`cv2.imshow` 需要图形桌面**：服务端在无显示环境（SSH/无头服务器）下会因 imshow 抛异常，
    导致该文件对处理失败并反复重试。当前无"无头模式"开关。
 5. **温度数据只打印不上传**：客户端解析出整幅温度数组，仅打印中心温度；检测决策完全依赖视觉模型。
@@ -305,7 +380,7 @@ python konggu_server.py
 
 ---
 
-## 八、License
+## 九、License
 
 > 项目基于内部/教学代码整理，暂未指定开源许可证。若需对外发布，请先在仓库添加
 > `LICENSE` 文件，并确认 SDK（UThermalLib 等私有库与模型权重）的分发许可。
