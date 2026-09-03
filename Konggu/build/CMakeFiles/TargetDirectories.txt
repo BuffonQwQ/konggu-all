@@ -1,0 +1,3 @@
+/home/pi/Desktop/Konggu/build/CMakeFiles/rebuild_cache.dir
+/home/pi/Desktop/Konggu/build/CMakeFiles/main.dir
+/home/pi/Desktop/Konggu/build/CMakeFiles/edit_cache.dir
