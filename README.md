@@ -382,5 +382,10 @@ python konggu_server.py
 
 ## 九、License
 
-> 项目基于内部/教学代码整理，暂未指定开源许可证。若需对外发布，请先在仓库添加
-> `LICENSE` 文件，并确认 SDK（UThermalLib 等私有库与模型权重）的分发许可。
+> 本项目采用**保留所有权利（All Rights Reserved）** 许可，详见仓库根目录 `LICENSE` 文件。
+>
+> - 源码与文档默认仅限版权人授权的内部教学、科研与项目研发使用；再分发与商用需书面许可。
+> - `include/`、`lib/` 下的供应商私有 SDK（UThermalLib、unitcam、Thermaltool、
+>   image_algorithms_lite、librknn_api、libusb 等）与 `*.pt` 模型权重**不在授权范围内**，
+>   其使用/分发须遵守各自权利人的许可约定。
+> - 版权人：广东华侨中学（Guangdong Overseas Chinese High School）。
