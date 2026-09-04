@@ -30,36 +30,10 @@
   将可见光多张局部图拼接为全景长图 → 依标定平移参数（`trans 100,-10`，对应热像/可见光垂直视差 Δh）
   把缺陷结果对齐到可见光全景 → 生成带标注的墙体全貌图。
 
-> 注：图中节点/时序反映了仓库内早期代码（JX007 机芯 + YOLO 检测）的实际行为；如需对照 Demo
-> 主链路，请以本节文字与“七”为准。
-
-```mermaid
-flowchart LR
-    subgraph client["采集客户端 (client/ - C++ 边缘设备)"]
-        A["红外机芯 UT-JX007<br/>(UThermalLib SDK)"]
-        E["USB 可见光摄像头<br/>(OpenCV VideoCapture)"]
-        A -->|"Y16 温度帧"| B["温度解析<br/>仅打印中心温度"]
-        A -->|"Y8 RGB 帧"| C["RGB→BGR + 镜像<br/>640 x 512"]
-        C --> D["每 10 帧存 {n}_temp.jpg"]
-        E --> F["count>30 后每 10 帧<br/>抓拍 {n}_camera.jpg"]
-        D --> G["本地 data/ 缓存目录"]
-        F --> G
-        G --> H["libcurl 多部分表单上传<br/>(每次两张各开一个 detach 线程)"]
-    end
-
-    H -- "POST /upload  (字段名 file)" --> S["Flask 服务 0.0.0.0:8088<br/>(konggu_server.py)"]
-    S --> I["uploads_konggu/ 收图<br/>按后缀进 temp/camera 两个队列"]
-    S --> J["监控线程<br/>每 1s 轮询目录配对"]
-
-    subgraph server["推理/展示服务端 (server/ - Python 工作台)"]
-        J -- "同前缀 {n}_temp.jpg / {n}_camera.jpg" --> K["pairAlign.py 对齐融合<br/>(可见光放大1.5x + 平移对齐)"]
-        K --> L["YOLO 推理 (cold/hot-best.pt)"]
-        L --> M["标注目标框并保存<br/>out/{n}.jpg + out/{n}_blended.jpg"]
-        M --> N["cv2.imshow 实时窗口展示"]
-    end
-
-    S -- "GET /clean (客户端启动时调用)" --> client
-```
+> 仓库**参考实现**的链路小结：客户端初始化 UT-JX007 机芯与可见光摄像头，采集主循环中
+> 每 10 帧保存一对热图/可见光抓拍，经 libcurl 上传至 Flask `/upload`；服务端按文件名前缀
+> 配对后执行对齐融合、YOLO 推理、结果落盘与窗口展示。交互时序见“二”，与当前 Demo 的
+> 差异见“七、八”。
 
 **设计要点**（均来自代码实际行为）：
 
@@ -69,52 +43,31 @@ flowchart LR
 
 ---
 
-## 二、数据流时序图
+## 二、数据流时序（仓库参考实现）
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as 客户端 main.cpp
-    participant S as 服务端 Flask
-    participant T as 监控/配对线程
+**① 客户端启动**
 
-    Note over C: 启动流程
-    C->>S: GET /clean  (请求清空服务端缓存)
-    S-->>C: Successfully cleaned!
-    C->>C: 删除本地 data/ 旧图、打开可见光摄像头
-    C->>C: UT_Init(JX007) → 注册回调
-    loop 预热: sleep(1) x5
-    end
-    C->>C: DEV_OUT_IMAGE 开启出图 + 设置 IRON 调色板
+1. `GET /clean` 请求服务端清空缓存，收到 `Successfully cleaned!` 后继续；
+2. 删除本地 `data/` 旧图，打开可见光摄像头；
+3. `UT_Init(UT_JX007)` 注册回调 → 预热 `sleep(1)×5` → 开启出图并设置 IRON 调色板。
 
-    loop 采集主循环 (每帧)
-        C->>C: UT_GetFrame 取帧
-        alt 帧类型 = Y16 (温度)
-            C->>C: UT_AnalysisTempFrame → 打印中心温度
-        else 帧类型 = Y8 (图像)
-            C->>C: UT_AnalysisImageFrameRGB → BGR + flip
-            Note over C: 每当 count % 10 == 0:
-            C->>C: 保存 data/{count}_temp.jpg
-            alt count > 30 (预热期结束)
-                C->>C: 从可见光摄像头抓拍 data/{count}_camera.jpg
-                C->>S: POST /upload  ({count}_temp.jpg)
-                C->>S: POST /upload  ({count}_camera.jpg)
-                S-->>C: HTTP 200 {result:1}
-            end
-        end
-    end
+**② 采集主循环（每帧）**
 
-    Note over S: /upload 处理器按后缀入队
-    S->>S: temp_file_path_list / camera_file_path_list
-    loop 监控线程每 1s 轮询
-        T->>T: 扫描 uploads_konggu/ 找出未处理 jpg
-        T->>T: 按前缀匹配文件对 (n_temp.jpg, n_camera.jpg)
-        T->>T: pairAlign 缩放/平移/裁剪对齐 → blend
-        T->>T: YOLO 推理 → class 0 目标框延展标注
-        T->>T: 输出 out/{n}.jpg、out/{n}_blended.jpg
-        T->>N: cv2.imshow 窗口展示
-    end
-```
+1. `UT_GetFrame` 取帧：
+   - 帧类型 **Y16**（温度）：`UT_AnalysisTempFrame` 解析并打印中心温度；
+   - 帧类型 **Y8**（图像）：转 BGR + 镜像；`count % 10 == 0` 时保存 `data/{count}_temp.jpg`。
+2. `count > 30`（预热结束）后，再从可见光相机抓拍 `data/{count}_camera.jpg`，
+   并把两张图各用一个 `std::thread().detach()` 上传（`POST /upload`，字段名 `file`），
+   服务端返回 `HTTP 200 {result:1}`。
+
+**③ 服务端后台处理**
+
+1. `/upload` 按文件名后缀，把图片分别加入 `temp_file_path_list` / `camera_file_path_list`；
+2. 监控线程每 1 s 轮询 `uploads_konggu/`，按前缀匹配 `{n}_temp.jpg` 与 `{n}_camera.jpg`；
+3. `pairAlign` 缩放/平移/裁剪对齐并融合 → YOLO 推理（class 0 目标框标注）→
+   输出 `out/{n}.jpg`、`out/{n}_blended.jpg` → `cv2.imshow` 窗口展示。
+
+> 注：以上时序为仓库早期代码的实际行为；当前 Demo 的取流、模型与拼接链路演进见“八、已知限制与版本差异”。
 
 ---
 
